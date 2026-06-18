@@ -1,7 +1,7 @@
 {
   "id": "plugin-share-linker",
   "name": "Share Linker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.5.0",
   "description": "Share selected community extensions from the current vault to another vault by copying folders or creating symbolic links.",
   "author": "Sean",
