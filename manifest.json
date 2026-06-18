@@ -1,0 +1,9 @@
+{
+  "id": "plugin-share-linker",
+  "name": "Plugin Share Linker",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Share selected plugins from the current vault to another Obsidian vault by creating symbolic links.",
+  "author": "Sean",
+  "isDesktopOnly": true
+}
