@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<!--
+  topic: Share Linker 设置页 —— 在插件共享之外新增「主题」与「CSS 片段」共享，并可为目标库勾选要启用的插件。
+  questions this version reflects (all fifteen answered; every region is drawn as settled):
+    q1 启用插件写到什么程度 → A 增量追加（勾选“启用”的 ID 加入目标库既有列表，不删除任何已有项）
+    q2 主题要不要支持“复制 / 软链接” → A 两者都支持，复用插件那套模式与冲突规则
+    q3 目标库怎么配置 → A 一条目标 Vault 路径 + 页内分节（插件 / 主题 / 片段）
+    q4 写 community-plugins.json 的安全层 → A 备份 + 原子写 + 只写已落地插件 + 提示先关目标库
+    q5 要不要顺带切换目标库当前主题 → C 只在目标库没有自定义主题时才切换
+    q6 片段要不要自动启用 → A 每行“共享 + 启用”，写 enabledCssSnippets（只追加）
+    q7 操作按钮挂在哪一层 → A 每区一组“复制 / 软链接”，作用于该区勾选项
+    q8 主题 / 片段识别规则 → A 主题认含 theme.css 的子目录，片段认 snippets/ 第一层 *.css
+    q9 复制模式重复共享 → A 保持“已存在就跳过”，结果写“已存在（未更新）”
+    q10 多个主题时选谁 → C 主题区加单选“设为目标库当前主题”由用户指定
+    q11 文件与启用写入分几步 → A 一次完成
+    q12 结果怎么呈现 → A 每区文件明细 + 顶部总摘要
+    q13 目标库已有主题时单选还能用吗 → B 可用且覆盖，默认不选仍走 q5 的保守规则
+    q14 软链接写绝对还是相对 → B 保持绝对路径，结果里显示实际链接目标
+    q15 目标路径存在但不是 Obsidian 库 → B 允许并创建 .obsidian
+  assumed regions: none — Q1–Q15 are all answered, so every region is drawn plain with a 已定 chip.
+  v3 (redraw) changes:
+    - themes / snippets: per-row 复制 / 软链接 removed; each section gains one toolbar
+      (复制 / 软链接) acting on all checked items in that section (q7)
+    - themes: new radio group “设为目标库当前主题” (不设置 / Blue Topaz / Minimal, 不设置 default)
+      with a muted note on explicit override of appearance.json cssTheme (q10 + q13)
+    - snippets: 共享 + 启用 checkboxes stay; section note kept (q6)
+    - target path: muted line that a non-vault directory gets its .obsidian created (q15)
+    - result card: two summary lines (目标库启用 / 目标库当前主题, theme line follows the radio),
+      per-area detail, Minimal “已存在（未更新）”, an absolute link target on the created plugin
+      row, and a muted “restart Obsidian” line
+  v2 kept: 已定 chips everywhere, .bak + atomic-write plugin hint, snippet enable checkboxes.
+  fidelity: Obsidian 1.x dark theme (settings modal, vertical tabs, plugin settings panel).
+  Obsidian bundles its own interface font; this prototype uses the nearest system stack so it works offline.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Share Linker — 插件共享设置</title>
+<style>
+:root{
+  --bg-primary:#1e1e1e;
+  --bg-secondary:#161616;
+  --bg-card:#232323;
+  --bg-modifier-form:rgba(0,0,0,.30);
+  --bg-modifier-hover:rgba(255,255,255,.075);
+  --border:#333333;
+  --border-soft:#2c2c2c;
+  --border-strong:#3d3d3d;
+  --text-normal:#dcddde;
+  --text-muted:#a0a0a0;
+  --text-faint:#7d7d7d;
+  --accent:#7f6df2;
+  --accent-soft:rgba(127,109,242,.14);
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",Roboto,Inter,sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",monospace;
+  --radius-s:4px;
+  --radius-m:6px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:#141414;color:var(--text-normal);
+  font-family:var(--font-ui);font-size:13px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button{font-family:inherit}
+/* ---------- dimmed Obsidian workspace behind the modal ---------- */
+.workspace{position:fixed;inset:0;display:flex;background:#1e1e1e;overflow:hidden}
+.ribbon{width:44px;flex:none;background:#181818;border-right:1px solid #262626;
+  display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:16px}
+.ribbon i{display:block;width:20px;height:20px;border-radius:4px;background:#2b2b2b;opacity:.55}
+.ws-main{flex:1;min-width:0;padding:10px 20px}
+.ws-tabs{display:flex;gap:4px;margin-bottom:26px}
+.ws-tab{font-size:12px;padding:5px 12px;border-radius:4px;color:#8a8a8a}
+.ws-tab.on{background:#2a2a2a;color:#c9c9c9}
+.ws-note{max-width:640px;margin:0 auto}
+.ws-note h1{font-size:22px;font-weight:600;color:#c8c8c8;margin:0 0 18px}
+.ws-note p{height:9px;border-radius:4px;background:#2c2c2c;margin:0 0 11px;opacity:.7}
+.ws-note p:nth-of-type(2){width:88%}
+.ws-note p:nth-of-type(3){width:64%}
+.ws-note p:nth-of-type(4){width:75%}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.62)}
+/* ---------- settings modal chrome ---------- */
+.settings-modal{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(1040px,96vw);height:min(748px,92vh);
+  display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg-primary);border:1px solid #3a3a3a;border-radius:8px;
+  box-shadow:0 18px 56px rgba(0,0,0,.72),0 2px 8px rgba(0,0,0,.5);
+  z-index:20;
+}
+.modal-head{flex:none;height:46px;display:flex;align-items:center;padding:0 10px 0 18px;
+  border-bottom:1px solid var(--border-soft)}
+.modal-title{font-size:14px;font-weight:600;letter-spacing:.01em;color:#e2e2e2}
+.modal-close{margin-left:auto}
+.modal-body{flex:1;min-height:0;display:flex}
+.settings-nav{width:224px;flex:none;background:var(--bg-secondary);border-right:1px solid #2a2a2a;
+  padding:14px 10px;overflow-y:auto}
+.nav-item{padding:6px 10px;border-radius:var(--radius-s);font-size:13px;color:#a6a6a6;
+  cursor:default;margin-bottom:2px;white-space:nowrap}
+.nav-item:hover{background:rgba(255,255,255,.05);color:#dcddde}
+.nav-item.active{background:rgba(255,255,255,.085);color:#f1f1f1}
+.nav-sub{margin:2px 0 2px 10px;padding-left:6px;border-left:1px solid #303030}
+.nav-sub .nav-item{font-size:12.5px;padding:5px 10px;color:#b9b9b9}
+.settings-content{flex:1;min-width:0;overflow-y:auto;padding:30px 40px 60px}
+.settings-content::-webkit-scrollbar{width:11px}
+.settings-content::-webkit-scrollbar-thumb,.settings-nav::-webkit-scrollbar-thumb{
+  background:#3a3a3a;border-radius:6px;border:3px solid transparent;background-clip:content-box}
+.panel{max-width:820px;margin:0}
+/* ---------- generic controls ---------- */
+input[type=checkbox]{
+  -webkit-appearance:none;appearance:none;flex:none;width:16px;height:16px;margin:0;
+  border:1px solid #4b4b4b;border-radius:4px;background:#2a2a2a;
+  position:relative;cursor:pointer;transition:background .1s,border-color .1s;
+}
+input[type=checkbox]:hover{border-color:#5d5d5d}
+input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+input[type=checkbox]:checked::after{
+  content:"";position:absolute;left:5px;top:1px;width:4px;height:9px;
+  border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+input[type=checkbox]:focus-visible{outline:2px solid rgba(127,109,242,.55);outline-offset:2px}
+input[type=radio]{
+  -webkit-appearance:none;appearance:none;flex:none;width:14px;height:14px;margin:0;
+  border:1px solid #4b4b4b;border-radius:50%;background:#2a2a2a;
+  position:relative;cursor:pointer;transition:border-color .1s,background .1s;
+}
+input[type=radio]:hover{border-color:#5d5d5d}
+input[type=radio]:checked{border-color:var(--accent);background:#2a2a2a}
+input[type=radio]:checked::after{
+  content:"";position:absolute;left:3px;top:3px;width:6px;height:6px;border-radius:50%;
+  background:var(--accent)}
+input[type=radio]:focus-visible{outline:2px solid rgba(127,109,242,.55);outline-offset:2px}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:28px;padding:0 11px;border-radius:999px;cursor:pointer;
+  font-size:12.5px;color:#d2d2d2;background:#262626;border:1px solid #3a3a3a;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.btn:hover{background:#303030;border-color:#484848;color:#ececec}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:13px;height:13px;opacity:.8}
+.btn.tiny{height:24px;padding:0 9px;font-size:11.5px;border-radius:var(--radius-s);
+  background:#2a2a2a;gap:5px}
+.btn.tiny svg{width:11px;height:11px}
+.icon-btn{
+  display:inline-grid;place-items:center;width:28px;height:28px;padding:0;
+  background:transparent;border:1px solid transparent;border-radius:var(--radius-s);
+  color:#8f8f8f;cursor:pointer;transition:background .12s,color .12s,border-color .12s;
+}
+.icon-btn:hover{background:var(--bg-modifier-hover);color:#dcddde;border-color:#3a3a3a}
+.icon-btn svg{width:16px;height:16px}
+.icon-btn.spin svg{animation:spin .5s linear}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.chip{
+  display:inline-block;font-family:var(--font-mono);font-size:11px;line-height:16px;
+  padding:0 6px;border-radius:3px;color:#c3bcf3;
+  background:var(--accent-soft);border:1px solid rgba(127,109,242,.30);
+  white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+}
+.chip.path{font-size:11.5px;line-height:18px;color:#c9c4ef;background:rgba(255,255,255,.055);
+  border-color:#3a3a3a}
+.muted{color:var(--text-muted)}
+.tag{
+  display:inline-flex;align-items:center;gap:5px;font-size:10px;letter-spacing:.02em;
+  padding:1px 6px;border-radius:3px;color:#cdb571;background:rgba(205,181,113,.07);
+  border:1px dashed rgba(205,181,113,.45);white-space:nowrap;font-weight:500;
+}
+.tag::before{content:"";width:5px;height:5px;border-radius:50%;background:rgba(205,181,113,.75)}
+.settled{
+  display:inline-flex;align-items:center;font-size:10px;letter-spacing:.02em;
+  padding:1px 6px;border-radius:3px;color:#8c8c8c;background:rgba(255,255,255,.04);
+  border:1px solid #343434;white-space:nowrap;font-weight:500;
+}
+/* ---------- panel head ---------- */
+.page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.page-head h2{margin:0;font-size:20px;font-weight:600;letter-spacing:-.01em;color:#e6e6e6}
+.vault-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  margin:0 0 18px;font-size:12.5px;color:var(--text-muted)}
+/* ---------- target path setting ---------- */
+.setting-block{padding:14px 0 16px;border-top:1px solid var(--border-soft)}
+.setting-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  font-size:13px;font-weight:500;color:var(--text-normal)}
+.setting-desc{margin-top:3px;font-size:12px;color:#8d8d8d;line-height:1.5}
+.text-input{
+  display:block;width:100%;height:32px;margin-top:10px;padding:0 9px;
+  font-family:var(--font-ui);font-size:13px;color:var(--text-normal);
+  background:var(--bg-modifier-form);border:1px solid #3a3a3a;border-radius:var(--radius-s);
+  outline:none;transition:border-color .12s,box-shadow .12s;
+}
+.text-input:hover{border-color:#4a4a4a}
+.text-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(127,109,242,.18)}
+/* ---------- sections ---------- */
+.section{margin-top:24px}
+.section-head{display:flex;align-items:center;gap:8px;padding-top:18px;
+  border-top:1px solid var(--border-soft);margin-bottom:12px}
+.section-head h3{margin:0;font-size:13.5px;font-weight:600;color:#dcddde}
+.section-count{margin-left:auto;font-size:11.5px;color:#8a8a8a;white-space:nowrap}
+.toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.toolbar-sep{width:1px;height:18px;background:#3a3a3a;margin:0 4px}
+.count-line{margin:11px 0;font-size:12px;color:#8f8f8f}
+/* ---------- plugin rows ---------- */
+.plugin-list{display:flex;flex-direction:column;gap:7px}
+.plugin-row{
+  display:flex;align-items:flex-start;gap:12px;padding:11px 12px;
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-m);
+}
+.plugin-row:hover{border-color:#3d3d3d}
+.checks{display:flex;gap:4px;flex:none;padding-right:11px;border-right:1px solid #383838}
+.mini{display:flex;flex-direction:column;align-items:center;gap:4px;width:32px;cursor:pointer;user-select:none}
+.mini span{font-size:10.5px;color:#8a8a8a;letter-spacing:.01em}
+.plugin-body{flex:1;min-width:0}
+.plugin-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  font-size:14px;font-weight:600;color:#e0e0e0}
+.plugin-title .meta{font-size:11.5px;font-weight:400;color:var(--text-faint)}
+.desc{margin-top:3px;font-size:12.5px;color:#a5a5a5}
+.row-note{margin-top:5px;font-size:11.5px;color:#8b857a;font-style:italic}
+.row-note::before{content:"↳ ";color:#6f6a60}
+/* ---------- pagination ---------- */
+.pager{display:flex;align-items:center;gap:8px;margin-top:10px}
+.pager-btn{width:26px;height:26px;border:1px solid #383838;background:#242424;color:#bdbdbd}
+.pager-btn:hover:not(:disabled){background:#2e2e2e;color:#eee}
+.pager-btn:disabled{opacity:.32;cursor:default}
+.pager-btn svg{width:14px;height:14px}
+.pager-label{font-size:12px;color:#9a9a9a}
+.page-size{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:#8f8f8f}
+.dropdown{
+  height:26px;padding:0 5px;font-family:var(--font-ui);font-size:12px;
+  color:#cfcfcf;background:#242424;border:1px solid #3a3a3a;border-radius:var(--radius-s);
+  outline:none;cursor:pointer;
+}
+.hint{display:flex;gap:6px;align-items:flex-start;margin:14px 0 0;
+  font-size:11.5px;line-height:1.65;color:#828282}
+.hint svg{width:13px;height:13px;flex:none;margin-top:2px;color:#9c92ef;opacity:.85}
+.hint code{font-family:var(--font-mono);font-size:11px;color:#a9a2cf}
+.section-note{margin:9px 0 0;font-size:11.5px;line-height:1.6;color:#828282}
+/* ---------- resource rows (themes / snippets) ---------- */
+.res-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.toolbar + .res-list{margin-top:10px}
+.res-row{display:flex;align-items:center;gap:12px;padding:9px 12px;
+  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-m)}
+.res-row:hover{border-color:#3d3d3d}
+.res-check{display:inline-flex;align-items:center;gap:7px;min-width:60px;
+  font-size:11.5px;color:#9d9d9d;cursor:pointer;user-select:none}
+.res-check input[type=checkbox]{width:15px;height:15px}
+.res-check input[type=checkbox]:checked::after{left:4px;top:0}
+.res-checks{display:flex;align-items:center;gap:14px;flex:none}
+.res-main{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;overflow:hidden}
+.res-name{font-size:13.5px;font-weight:500;color:#dcddde;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.res-name.mono{font-family:var(--font-mono);font-size:12.5px;font-weight:400;color:#d2d2d2}
+.res-main .meta{font-size:11.5px;color:var(--text-faint);white-space:nowrap}
+.res-actions{display:flex;gap:6px;flex:none}
+/* ---------- theme radio group ---------- */
+.radio-block{margin-top:12px;padding:10px 12px 11px;background:rgba(255,255,255,.022);
+  border:1px solid var(--border-soft);border-radius:var(--radius-m)}
+.radio-title{font-size:12px;color:#a9a9a9;margin-bottom:9px}
+.radio-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.radio-row .res-check{min-width:0;gap:6px;color:#b4b4b4}
+.radio-row .res-check input{width:14px;height:14px}
+/* ---------- result card ---------- */
+.result-card{
+  margin-top:26px;padding:12px 14px;border:1px solid #3a3a3a;border-left:2px solid var(--accent);
+  border-radius:var(--radius-m);background:#202020;
+}
+.result-card.flash{animation:flash .6s ease-out}
+@keyframes flash{0%{border-left-color:#c3b8ff;box-shadow:0 0 0 1px rgba(127,109,242,.35)}
+  100%{border-left-color:var(--accent);box-shadow:none}}
+.result-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.result-title{font-size:12.5px;font-weight:600;color:#dcddde}
+.mode-chip{font-size:10.5px;padding:0 6px;border-radius:3px;color:#c3bcf3;
+  background:var(--accent-soft);border:1px solid rgba(127,109,242,.32)}
+.result-summary{margin:0 0 7px;font-size:12.5px;color:#b4b4b4}
+.result-enable{margin:0 0 3px;font-size:12px;color:#8f8f8f}
+.result-enable::before{content:"";display:inline-block;width:4px;height:4px;border-radius:50%;
+  background:#6d6d6d;margin-right:6px;vertical-align:1px}
+.result-list{list-style:none;margin:9px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.result-list li{display:block;font-size:12px;line-height:1.6;color:#a6a6a6}
+.result-list li.area{margin-top:6px;font-size:11px;color:#7d7d7d;letter-spacing:.02em}
+.result-list li.area:first-child{margin-top:0}
+.result-list .rname{color:#cfcfcf}
+.result-list .status{font-size:11.5px}
+.result-list .rpath{font-family:var(--font-mono);font-size:11px;color:#9c96c9;
+  word-break:break-all;margin-left:2px}
+.status.created{color:#6bbf8b}
+.status.exists{color:#c9a55c}
+.result-restart{margin:9px 0 0;font-size:11.5px;color:#828282}
+@media (max-width:900px){
+  .settings-nav{display:none}
+  .settings-content{padding:22px 20px 48px}
+  .settings-modal{height:94vh}
+}
+</style>
+</head>
+<body>
+<div class="workspace" aria-hidden="true">
+  <div class="ribbon"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="ws-main">
+    <div class="ws-tabs"><span class="ws-tab on">笔记</span><span class="ws-tab">白板</span></div>
+    <div class="ws-note">
+      <h1>插件共享方案</h1>
+      <p></p><p></p><p></p><p></p>
+    </div>
+  </div>
+</div>
+<div class="scrim"></div>
+
+<div class="settings-modal" role="dialog" aria-modal="true" aria-label="设置">
+  <header class="modal-head">
+    <div class="modal-title">设置</div>
+    <button class="icon-btn modal-close" aria-label="关闭设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </header>
+
+  <div class="modal-body">
+    <nav class="settings-nav" aria-label="设置分类">
+      <div class="nav-item">关于</div>
+      <div class="nav-item">外观</div>
+      <div class="nav-item">编辑器</div>
+      <div class="nav-item">文件与链接</div>
+      <div class="nav-item">快捷键</div>
+      <div class="nav-item">核心插件</div>
+      <div class="nav-item">第三方插件</div>
+      <div class="nav-sub"><div class="nav-item active">Share Linker</div></div>
+      <div class="nav-item">账户</div>
+    </nav>
+
+    <main class="settings-content">
+      <div class="panel">
+
+        <!-- 1. plugin page header -->
+        <div class="page-head">
+          <h2>插件共享</h2>
+          <button class="icon-btn" title="English" aria-label="English">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M3 12h18"/>
+              <path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- 2. current vault -->
+        <p class="vault-line">
+          <span>当前 Vault：</span>
+          <code class="chip path">E:\ProjectSrc\notes-main</code>
+        </p>
+
+        <!-- 3. target vault path (q3, answered A) -->
+        <div class="setting-block">
+          <div class="setting-name">
+            <span>目标 Vault 路径 A</span>
+            <span class="settled">已定</span>
+          </div>
+          <div class="setting-desc">共享写入的目标库根目录；插件、主题与 CSS 片段都写入这一个库。</div>
+          <input class="text-input" type="text" value="E:\ProjectSrc\notes-work" spellcheck="false" aria-label="目标 Vault 路径 A">
+          <p class="section-note">如果该目录还不是 Obsidian 库，共享会在其中创建 .obsidian 目录。</p>
+        </div>
+
+        <!-- 4. plugins -->
+        <section class="section" aria-labelledby="pluginsH">
+          <div class="section-head">
+            <h3 id="pluginsH">插件 (3)</h3>
+            <span class="settled">已定</span>
+            <span class="section-count" id="pluginsCount">已选 2 个</span>
+          </div>
+
+          <div class="toolbar">
+            <button class="btn" id="btnRefresh" title="重新扫描插件目录">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>
+              </svg>
+              刷新
+            </button>
+            <button class="btn" id="btnSelectAll" title="选中当前页全部插件">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/>
+              </svg>
+              全选
+            </button>
+            <button class="btn" id="btnSelectNone" title="取消当前页全部选中">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9l6 6M15 9l-6 6"/>
+              </svg>
+              取消全选
+            </button>
+            <span class="toolbar-sep" aria-hidden="true"></span>
+            <button class="btn action-btn" data-mode="复制">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="12" height="12" rx="2"/><path d="M15 5H5a2 2 0 0 0-2 2v10"/>
+              </svg>
+              复制
+            </button>
+            <button class="btn action-btn" data-mode="软链接">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9"/>
+                <path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13 19.1"/>
+              </svg>
+              软链接
+            </button>
+          </div>
+
+          <p class="count-line" id="pluginCountLine">已发现 3 个插件，已选择 2 个。当前第 1 / 2 页。</p>
+
+          <div class="plugin-list" id="pluginList"></div>
+
+          <div class="pager">
+            <button class="icon-btn pager-btn" id="prevPage" aria-label="上一页">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 18l-6-6 6-6"/>
+              </svg>
+            </button>
+            <span class="pager-label" id="pagerLabel">第 1 / 2 页</span>
+            <button class="icon-btn pager-btn" id="nextPage" aria-label="下一页">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18l6-6-6-6"/>
+              </svg>
+            </button>
+            <label class="page-size">每页
+              <select class="dropdown" aria-label="每页数量">
+                <option>10 个</option>
+                <option>20 个</option>
+                <option>50 个</option>
+              </select>
+            </label>
+          </div>
+
+          <p class="hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>
+            </svg>
+            <span>启用会写入目标库 <code>.obsidian/community-plugins.json</code>：先备份为 <code>.bak</code>，再临时文件 + rename 原子写；只启用成功落到目标库的插件（冲突/失败的不写）；目标库里的 Obsidian 请先关闭，否则退出时可能覆盖。</span>
+          </p>
+        </section>
+
+        <!-- 5. themes (q2, answered A) -->
+        <section class="section" aria-labelledby="themesH">
+          <div class="section-head">
+            <h3 id="themesH">主题 (2)</h3>
+            <span class="settled">已定</span>
+            <span class="section-count" id="themesCount">已选 1 / 2</span>
+          </div>
+          <div class="toolbar">
+            <button class="btn action-btn" data-mode="复制">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="12" height="12" rx="2"/><path d="M15 5H5a2 2 0 0 0-2 2v10"/>
+              </svg>
+              复制
+            </button>
+            <button class="btn action-btn" data-mode="软链接">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9"/>
+                <path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13 19.1"/>
+              </svg>
+              软链接
+            </button>
+          </div>
+
+          <ul class="res-list">
+            <li class="res-row">
+              <label class="res-check"><input type="checkbox" class="share-check" data-sec="themes" checked><span>共享</span></label>
+              <div class="res-main"><span class="res-name">Blue Topaz</span><span class="meta">2023080203</span></div>
+            </li>
+            <li class="res-row">
+              <label class="res-check"><input type="checkbox" class="share-check" data-sec="themes"><span>共享</span></label>
+              <div class="res-main"><span class="res-name">Minimal</span><span class="meta">7.7.3</span></div>
+            </li>
+          </ul>
+
+          <div class="radio-block">
+            <div class="radio-title">设为目标库当前主题</div>
+            <div class="radio-row">
+              <label class="res-check"><input type="radio" name="themeTarget" value="" checked><span>不设置</span></label>
+              <label class="res-check"><input type="radio" name="themeTarget" value="Blue Topaz"><span>Blue Topaz</span></label>
+              <label class="res-check"><input type="radio" name="themeTarget" value="Minimal"><span>Minimal</span></label>
+            </div>
+          </div>
+          <p class="section-note">显式选中会覆盖目标库已有主题（appearance.json 的 cssTheme）；不选时，只有目标库没有自定义主题、且本次只共享一个主题，才自动设为该主题。</p>
+        </section>
+
+        <!-- 6. css snippets (q2, answered A) -->
+        <section class="section" aria-labelledby="snippetsH">
+          <div class="section-head">
+            <h3 id="snippetsH">CSS 片段 (2)</h3>
+            <span class="settled">已定</span>
+            <span class="section-count" id="snippetsCount">已选 1 / 2</span>
+          </div>
+          <div class="toolbar">
+            <button class="btn action-btn" data-mode="复制">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="12" height="12" rx="2"/><path d="M15 5H5a2 2 0 0 0-2 2v10"/>
+              </svg>
+              复制
+            </button>
+            <button class="btn action-btn" data-mode="软链接">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.1 0l2.4-2.4a5 5 0 0 0-7.1-7.1L11 4.9"/>
+                <path d="M14 11a5 5 0 0 0-7.1 0l-2.4 2.4a5 5 0 0 0 7.1 7.1L13 19.1"/>
+              </svg>
+              软链接
+            </button>
+          </div>
+
+          <ul class="res-list">
+            <li class="res-row">
+              <div class="res-checks">
+                <label class="res-check"><input type="checkbox" class="share-check" data-sec="snippets" checked><span>共享</span></label>
+                <label class="res-check"><input type="checkbox" class="enable-check" data-sec="snippets" checked><span>启用</span></label>
+              </div>
+              <div class="res-main"><span class="res-name mono">wide-tables.css</span></div>
+            </li>
+            <li class="res-row">
+              <div class="res-checks">
+                <label class="res-check"><input type="checkbox" class="share-check" data-sec="snippets"><span>共享</span></label>
+                <label class="res-check"><input type="checkbox" class="enable-check" data-sec="snippets"><span>启用</span></label>
+              </div>
+              <div class="res-main"><span class="res-name mono">callout-tweaks.css</span></div>
+            </li>
+          </ul>
+          <p class="section-note">启用写入目标库 appearance.json 的 enabledCssSnippets（只追加、不删除）。</p>
+        </section>
+
+        <!-- 7. result -->
+        <div class="result-card" id="resultCard" aria-live="polite">
+          <div class="result-head">
+            <span class="result-title">共享结果</span>
+            <span class="mode-chip" id="resultMode">复制</span>
+          </div>
+          <p class="result-summary" id="resultSummary">复制 3，已存在 2，冲突 0，失败 0。</p>
+          <p class="result-enable" id="resultEnable">目标库启用：新增 2 个插件、1 个片段。</p>
+          <p class="result-enable" id="resultTheme">目标库当前主题：未改动。</p>
+          <ul class="result-list">
+            <li class="area">插件</li>
+            <li><span class="rname">Dataview</span>：<span class="status created" data-kind="created">已创建</span><span class="rpath">→ E:\ProjectSrc\notes-main\.obsidian\plugins\dataview</span></li>
+            <li><span class="rname">Templater</span>：<span class="status exists" data-kind="exists">已存在</span></li>
+            <li class="area">主题</li>
+            <li><span class="rname">Blue Topaz</span>：<span class="status created" data-kind="created">已创建</span></li>
+            <li><span class="rname">Minimal</span>：<span class="status exists" data-kind="stale">已存在（未更新）</span></li>
+            <li class="area">片段</li>
+            <li><span class="rname">wide-tables.css</span>：<span class="status created" data-kind="created">已创建</span></li>
+          </ul>
+          <p class="result-restart">目标库重启 Obsidian（或 Ctrl/Cmd+R）后生效。</p>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var pages = [
+    [
+      { name: 'Dataview', folder: 'dataview', version: 'v0.5.67',
+        desc: 'Complex data views for the data-obsessed.', share: true, enable: true },
+      { name: 'Templater', folder: 'templater-obsidian', version: 'v2.4.1',
+        desc: 'Create and use templates.', share: true, enable: false,
+        note: '仅复制/链接，不在目标库启用' },
+      { name: 'Style Settings', folder: 'obsidian-style-settings', version: 'v1.0.9',
+        desc: 'Offer controls for style-related settings.', share: false, enable: false }
+    ],
+    [
+      { name: 'Calendar', folder: 'calendar', version: 'v1.5.10',
+        desc: 'Calendar view of your daily notes.', share: true, enable: true },
+      { name: 'Excalidraw', folder: 'obsidian-excalidraw-plugin', version: 'v2.2.10',
+        desc: 'An open-source virtual whiteboard.', share: false, enable: false },
+      { name: 'Omnisearch', folder: 'omnisearch', version: 'v1.24.1',
+        desc: 'Fuzzy search across your vault.', share: false, enable: true }
+    ]
+  ];
+
+  var page = 0;
+  var listEl = document.getElementById('pluginList');
+  var countLine = document.getElementById('pluginCountLine');
+  var pluginsCount = document.getElementById('pluginsCount');
+  var pagerLabel = document.getElementById('pagerLabel');
+  var prevBtn = document.getElementById('prevPage');
+  var nextBtn = document.getElementById('nextPage');
+  var resultCard = document.getElementById('resultCard');
+  var resultEnable = document.getElementById('resultEnable');
+
+  function rowHtml(p, i) {
+    return '' +
+      '<div class="plugin-row">' +
+        '<div class="checks">' +
+          '<label class="mini">' +
+            '<input type="checkbox" data-kind="share" data-i="' + i + '"' + (p.share ? ' checked' : '') + '>' +
+            '<span>共享</span>' +
+          '</label>' +
+          '<label class="mini">' +
+            '<input type="checkbox" data-kind="enable" data-i="' + i + '"' + (p.enable ? ' checked' : '') + '>' +
+            '<span>启用</span>' +
+          '</label>' +
+        '</div>' +
+        '<div class="plugin-body">' +
+          '<div class="plugin-title">' +
+            '<span>' + p.name + '</span>' +
+            '<code class="chip">' + p.folder + '</code>' +
+            '<span class="meta">' + p.version + '</span>' +
+          '</div>' +
+          '<div class="desc">' + p.desc + '</div>' +
+          (p.note ? '<div class="row-note">' + p.note + '</div>' : '') +
+        '</div>' +
+      '</div>';
+  }
+
+  function render() {
+    var rows = pages[page];
+    listEl.innerHTML = rows.map(rowHtml).join('');
+    var selected = rows.filter(function (r) { return r.share; }).length;
+    countLine.textContent = '已发现 ' + rows.length + ' 个插件，已选择 ' + selected +
+      ' 个。当前第 ' + (page + 1) + ' / ' + pages.length + ' 页。';
+    pluginsCount.textContent = '已选 ' + selected + ' 个';
+    pagerLabel.textContent = '第 ' + (page + 1) + ' / ' + pages.length + ' 页';
+    prevBtn.disabled = page === 0;
+    nextBtn.disabled = page === pages.length - 1;
+    updateEnableSummary();
+  }
+
+  listEl.addEventListener('change', function (e) {
+    var input = e.target;
+    if (!input.matches('input[data-kind]')) return;
+    var row = pages[page][Number(input.dataset.i)];
+    if (input.dataset.kind === 'share') row.share = input.checked;
+    else row.enable = input.checked;
+    render();
+  });
+
+  document.getElementById('btnSelectAll').addEventListener('click', function () {
+    pages[page].forEach(function (p) { p.share = true; });
+    render();
+  });
+
+  document.getElementById('btnSelectNone').addEventListener('click', function () {
+    pages[page].forEach(function (p) { p.share = false; });
+    render();
+  });
+
+  document.getElementById('btnRefresh').addEventListener('click', function (e) {
+    e.currentTarget.classList.remove('spin');
+    void e.currentTarget.offsetWidth;
+    e.currentTarget.classList.add('spin');
+    render();
+  });
+
+  prevBtn.addEventListener('click', function () {
+    if (page > 0) { page -= 1; render(); }
+  });
+  nextBtn.addEventListener('click', function () {
+    if (page < pages.length - 1) { page += 1; render(); }
+  });
+
+  function updateResCounts() {
+    ['themes', 'snippets'].forEach(function (sec) {
+      var boxes = Array.prototype.slice.call(
+        document.querySelectorAll('.share-check[data-sec="' + sec + '"]'));
+      var on = boxes.filter(function (b) { return b.checked; }).length;
+      document.getElementById(sec + 'Count').textContent = '已选 ' + on + ' / ' + boxes.length;
+    });
+  }
+
+  document.addEventListener('change', function (e) {
+    if (e.target.matches('.share-check')) updateResCounts();
+    updateEnableSummary();
+  });
+
+  function updateEnableSummary() {
+    var pluginCount = 0;
+    pages.forEach(function (rows) {
+      rows.forEach(function (p) { if (p.share && p.enable) pluginCount += 1; });
+    });
+    var snippetCount = Array.prototype.filter.call(
+      document.querySelectorAll('.enable-check[data-sec="snippets"]'),
+      function (box) { return box.checked; }).length;
+    resultEnable.textContent = '目标库启用：新增 ' + pluginCount +
+      ' 个插件、' + snippetCount + ' 个片段。';
+  }
+
+  function updateThemeSummary() {
+    var picked = '';
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="themeTarget"]'),
+      function (radio) { if (radio.checked) picked = radio.value; });
+    document.getElementById('resultTheme').textContent = picked
+      ? '目标库当前主题：已设为 ' + picked + '。'
+      : '目标库当前主题：未改动。';
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="themeTarget"]'),
+    function (radio) { radio.addEventListener('change', updateThemeSummary); });
+
+  function showResult(mode) {
+    var isLink = mode === '软链接';
+    document.getElementById('resultMode').textContent = mode;
+    document.getElementById('resultSummary').textContent =
+      (isLink ? '链接' : '复制') + ' 3，已存在 2，冲突 0，失败 0。';
+    updateEnableSummary();
+    updateThemeSummary();
+    Array.prototype.forEach.call(document.querySelectorAll('.result-list .status'), function (el) {
+      var kind = el.dataset.kind;
+      el.textContent = kind === 'created'
+        ? (isLink ? '已链接' : '已创建')
+        : (kind === 'stale' ? '已存在（未更新）' : '已存在');
+    });
+    resultCard.classList.remove('flash');
+    void resultCard.offsetWidth;
+    resultCard.classList.add('flash');
+    if (resultCard.scrollIntoView) {
+      resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.action-btn'), function (btn) {
+    btn.addEventListener('click', function () { showResult(btn.dataset.mode); });
+  });
+
+  render();
+  updateResCounts();
+  updateThemeSummary();
+})();
+</script>
+</body>
+</html>

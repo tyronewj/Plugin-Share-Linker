@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<!--
+  topic: 增加 Obsidian 设置共享 —— 在 Share Linker 设置页（PluginShareLinkerSettingTab）新增「Obsidian 设置」分区。
+
+  kind: prototype — a change to an existing app. The new section lands right after「目标库检测」and before「插件」.
+  The surrounding page is the real one: header（共享面板 + v1.1.0 + 语言按钮）, 当前 Vault 行,
+  目标 Vault 路径 row（选择… / 浏览… / 检查目标路径）, a compact 目标库检测 strip (summary only), then the new section,
+  then abbreviated 插件 / 主题 / CSS 片段 sections. Look copied from styles.css + main.js
+  (plugin-share-linker-section / -toolbar / -count / -hint / -target-chip / -pair row / .bak + 原子写 wording).
+
+  questions this version reflects (q1–q11, all answered, drawn plain):
+    q1  候选清单 → A 白名单 8 个文件，每文件一行、可单独勾选
+    q2  目标库已有同名文件 → B 键级合并：只覆盖源里出现的顶层键，目标库独有的键保留
+    q3  复制还是软链接 → A 只复制（.bak 备份 + 原子替换），不给设置文件软链接入口
+    q4  外观文件分工 → A 只共享没人管的键，跳过 cssTheme 与 enabledCssSnippets
+    q5  快捷键冲突 → B 合并前检测组合键冲突，列出冲突但仍写入
+    q6  按钮与确认流程 → A 勾选 + 一个「共享设置」+ 确认弹窗列出每个文件的差异键名
+    q7  目标库现状何时读 → 随「目标库检测」手动检测；行内 相同 / 有差异 N 个键 / 缺失，悬停行显示差异键
+    q8  库绑定键 → B 确认弹窗里单独点名（仍写入）
+    q9  某个文件写失败 → A 逐文件独立写，结果区给出 已写 / 未写 两份清单
+    q10 核心插件被关掉 → B 单独一行汇总「将启用 X 个、停用 Y 个核心插件：…」
+    q11 默认勾选 → A 默认全不勾，工具栏「全选 / 取消全选」
+  assumed regions: none — all eleven questions are answered, nothing here is dashed or tagged as assumed.
+
+  fidelity: Obsidian 1.x dark settings modal. Colours / type scale / spacing / radii are those of
+  styles.css on Obsidian's dark tokens; buttons 30px / radius 6px, chips are the plugin-share-linker
+  target-chip pill, rows are the pair-row card. Obsidian ships its own interface font — this file uses
+  the nearest system stack (Segoe UI / Noto Sans SC / Microsoft YaHei) so it works offline.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Share Linker — Obsidian 设置共享</title>
+<style>
+:root{
+  --bg-primary:#1e1e1e;
+  --bg-secondary:#161616;
+  --bg-card:#232323;
+  --form-field:rgba(0,0,0,.30);
+  --hover:rgba(255,255,255,.075);
+  --border:#333333;
+  --border-soft:#2c2c2c;
+  --text-normal:#dcddde;
+  --text-muted:#a3a3a3;
+  --text-faint:#7d7d7d;
+  --accent:#7f6df2;
+  --accent-soft:rgba(127,109,242,.14);
+  --success:#8fbf9f;
+  --success-line:rgba(107,191,139,.32);
+  --success-bg:rgba(107,191,139,.10);
+  --warn:#d8b76a;
+  --warn-line:rgba(205,181,113,.36);
+  --warn-bg:rgba(205,181,113,.09);
+  --error:#e2a3a3;
+  --error-line:rgba(214,109,109,.34);
+  --error-bg:rgba(214,109,109,.10);
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",Roboto,Inter,sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",monospace;
+  --radius-s:4px;
+  --radius-m:6px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:#141414;color:var(--text-normal);
+  font-family:var(--font-ui);font-size:13px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button{font-family:inherit}
+code{font-family:var(--font-mono)}
+
+/* ---------- dimmed Obsidian workspace behind the settings modal ---------- */
+.workspace{position:fixed;inset:0;display:flex;background:#1e1e1e;overflow:hidden}
+.ribbon{width:44px;flex:none;background:#181818;border-right:1px solid #262626;
+  display:flex;flex-direction:column;align-items:center;gap:18px;padding-top:16px}
+.ribbon i{display:block;width:20px;height:20px;border-radius:4px;background:#2b2b2b;opacity:.55}
+.ws-main{flex:1;min-width:0;padding:10px 20px}
+.ws-tabs{display:flex;gap:4px;margin-bottom:26px}
+.ws-tab{font-size:12px;padding:5px 12px;border-radius:4px;color:#8a8a8a}
+.ws-tab.on{background:#2a2a2a;color:#c9c9c9}
+.ws-note{max-width:640px;margin:0 auto}
+.ws-note h1{font-size:22px;font-weight:600;color:#c8c8c8;margin:0 0 18px}
+.ws-note p{height:9px;border-radius:4px;background:#2c2c2c;margin:0 0 11px;opacity:.7}
+.ws-note p:nth-of-type(2){width:88%}
+.ws-note p:nth-of-type(3){width:64%}
+.ws-note p:nth-of-type(4){width:75%}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.62)}
+
+/* ---------- settings modal chrome ---------- */
+.settings-modal{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(1060px,96vw);height:min(940px,96vh);
+  display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg-primary);border:1px solid #3a3a3a;border-radius:8px;
+  box-shadow:0 18px 56px rgba(0,0,0,.72),0 2px 8px rgba(0,0,0,.5);
+  z-index:20;
+}
+.modal-head{flex:none;height:46px;display:flex;align-items:center;padding:0 10px 0 18px;
+  border-bottom:1px solid var(--border-soft)}
+.modal-title{font-size:14px;font-weight:600;letter-spacing:.01em;color:#e2e2e2}
+.modal-close{margin-left:auto}
+.modal-body{flex:1;min-height:0;display:flex}
+.settings-nav{width:224px;flex:none;background:var(--bg-secondary);border-right:1px solid #2a2a2a;
+  padding:14px 10px;overflow-y:auto}
+.nav-item{padding:6px 10px;border-radius:var(--radius-s);font-size:13px;color:#a6a6a6;
+  cursor:default;margin-bottom:2px;white-space:nowrap}
+.nav-item:hover{background:rgba(255,255,255,.05);color:#dcddde}
+.nav-item.active{background:rgba(255,255,255,.085);color:#f1f1f1}
+.nav-sub{margin:2px 0 2px 10px;padding-left:6px;border-left:1px solid #303030}
+.nav-sub .nav-item{font-size:12.5px;padding:5px 10px;color:#b9b9b9}
+.settings-content{flex:1;min-width:0;overflow-y:auto;padding:26px 40px 44px}
+.settings-content::-webkit-scrollbar{width:11px}
+.settings-content::-webkit-scrollbar-thumb,.settings-nav::-webkit-scrollbar-thumb{
+  background:#3a3a3a;border-radius:6px;border:3px solid transparent;background-clip:content-box}
+.panel{max-width:820px;margin:0}
+
+/* ---------- generic controls ---------- */
+input[type=checkbox]{
+  -webkit-appearance:none;appearance:none;flex:none;width:16px;height:16px;margin:0;
+  border:1px solid #4b4b4b;border-radius:var(--radius-s);background:#2a2a2a;
+  position:relative;cursor:pointer;transition:background .1s,border-color .1s;
+}
+input[type=checkbox]:hover{border-color:#5d5d5d}
+input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+input[type=checkbox]:checked::after{
+  content:"";position:absolute;left:5px;top:1px;width:4px;height:9px;
+  border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+input[type=checkbox]:focus-visible{outline:2px solid rgba(127,109,242,.55);outline-offset:2px}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:30px;padding:0 12px;border-radius:var(--radius-m);cursor:pointer;
+  font-size:13px;color:#d2d2d2;background:#2a2a2a;border:1px solid #3a3a3a;
+  transition:background .12s,border-color .12s,color .12s;white-space:nowrap;
+}
+.btn:hover:not(:disabled){background:#333;border-color:#474747;color:#ececec}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.42;cursor:default}
+.btn svg{width:14px;height:14px;flex:none;opacity:.82}
+.btn.cta{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.btn.cta svg{opacity:.95}
+.btn.cta:hover:not(:disabled){background:#8b7bf4;border-color:#8b7bf4;color:#fff}
+.btn.min96{min-width:96px}
+.btn.tiny{height:26px;padding:0 10px;font-size:12px;border-radius:var(--radius-s);gap:5px}
+.btn.tiny svg{width:12px;height:12px}
+.icon-btn{
+  display:inline-grid;place-items:center;width:28px;height:28px;padding:0;
+  background:transparent;border:1px solid transparent;border-radius:var(--radius-s);
+  color:#8f8f8f;cursor:pointer;transition:background .12s,color .12s,border-color .12s;
+}
+.icon-btn:hover{background:var(--hover);color:#dcddde;border-color:#3a3a3a}
+.icon-btn svg{width:16px;height:16px}
+.chip{
+  display:inline-flex;align-items:center;gap:4px;flex:none;
+  padding:1px 8px;border:1px solid var(--border);border-radius:10px;
+  font-size:11.5px;line-height:1.55;white-space:nowrap;
+  color:var(--text-muted);background:var(--bg-secondary);
+}
+.chip.same{color:var(--success);border-color:var(--success-line);background:var(--success-bg)}
+.chip.diff{color:var(--warn);border-color:var(--warn-line);background:var(--warn-bg)}
+.chip.missing{color:var(--text-faint);border-style:dashed}
+.chip.unknown{color:var(--text-faint)}
+
+/* ---------- panel head ---------- */
+.page-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.page-head h2{margin:0;font-size:20px;font-weight:600;letter-spacing:-.01em;color:#e6e6e6}
+.page-head .btn{margin-left:auto;height:28px}
+.version{align-self:center;color:var(--text-faint);font-size:11.5px;font-weight:400}
+.vault-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  margin:6px 0 14px;font-size:12.5px;color:var(--text-muted)}
+.vault-line code{font-family:var(--font-mono);font-size:12px;color:#d6d6d6;padding:1px 5px;
+  border-radius:3px;background:rgba(255,255,255,.06)}
+
+/* ---------- target path setting ---------- */
+.setting-block{padding:14px 0 6px;border-top:1px solid var(--border-soft)}
+.setting-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  font-size:13px;font-weight:500;color:var(--text-normal)}
+.setting-desc{margin-top:3px;font-size:12px;color:#8d8d8d;line-height:1.5}
+.path-row{display:flex;align-items:flex-start;gap:8px;margin-top:10px}
+.text-input{
+  display:block;height:32px;padding:0 9px;flex:1;min-width:0;
+  font-family:var(--font-ui);font-size:13px;color:var(--text-normal);
+  background:var(--form-field);border:1px solid #3a3a3a;border-radius:var(--radius-s);
+  outline:none;transition:border-color .12s,box-shadow .12s;
+}
+.text-input:hover{border-color:#4a4a4a}
+.text-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(127,109,242,.18)}
+.path-row .btn{flex:none;height:32px;min-width:96px;border-radius:var(--radius-s)}
+.section-note{margin:9px 0 0;font-size:11.5px;line-height:1.6;color:#828282}
+.section-note code{font-size:11px;color:#a9a2cf}
+
+/* ---------- sections ---------- */
+.section{margin-top:22px;padding-top:16px;border-top:1px solid var(--border-soft)}
+.section h3{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--text-normal)}
+.count-line{margin:0 0 8px;font-size:11.5px;color:var(--text-muted)}
+.toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:2px 0 10px}
+.toolbar .btn{min-width:96px}
+.toolbar-sep{width:1px;height:18px;background:#3a3a3a;margin:0 4px}
+.toolbar-status{margin-left:4px;font-size:11.5px;color:var(--text-faint)}
+.hint{display:flex;gap:6px;align-items:flex-start;margin:12px 0 0;
+  font-size:11.5px;line-height:1.65;color:#828282}
+.hint svg{width:13px;height:13px;flex:none;margin-top:2px;color:#9c92ef;opacity:.85}
+.hint code{font-size:11px;color:#a9a2cf}
+
+/* ---------- link health (compact strip) ---------- */
+.head-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.head-row h3{margin:0}
+.head-row .btn{margin-left:auto;min-width:96px}
+.head-row .head-count{margin-left:auto;font-size:11.5px;color:var(--text-muted);white-space:nowrap}
+.badge{padding:1px 8px;border:1px solid var(--error-line);border-radius:10px;
+  color:var(--error);font-size:11.5px;white-space:nowrap}
+.badge.ok{border-color:var(--success-line);color:var(--success)}
+.health-line{margin:0;font-size:11.5px;line-height:1.6;color:#8a8a8a}
+.health-line b{font-weight:500;color:#b4b4b4}
+
+/* ---------- Obsidian settings section ---------- */
+.set-list{display:flex;flex-direction:column;gap:6px}
+.set-row{
+  display:grid;grid-template-columns:17px 128px minmax(0,1fr) auto;
+  gap:10px;align-items:center;padding:7px 10px;cursor:help;
+  border:1px solid var(--border);border-radius:var(--radius-m);background:var(--bg-primary);
+}
+.set-row:hover{background:var(--bg-secondary)}
+.set-row.is-checked{background:rgba(127,109,242,.05);border-color:#3b3850}
+.set-name{font-family:var(--font-mono);font-size:12.5px;color:#cfcfcf;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.set-desc{font-size:12px;color:var(--text-muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.set-row.is-checked .set-name{color:#e2e0f5}
+
+/* ---------- result card ---------- */
+.result-card{margin-top:18px;padding:12px 14px;border:1px solid #3a3a3a;
+  border-left:2px solid var(--accent);border-radius:var(--radius-m);background:#202020}
+.result-card.flash{animation:flash .7s ease-out}
+@keyframes flash{0%{border-left-color:#c3b8ff;box-shadow:0 0 0 1px rgba(127,109,242,.35)}
+  100%{border-left-color:var(--accent);box-shadow:none}}
+.result-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.result-title{font-size:12.5px;font-weight:600;color:#dcddde}
+.mode-chip{font-size:10.5px;padding:0 6px;border-radius:3px;color:#c3bcf3;
+  background:var(--accent-soft);border:1px solid rgba(127,109,242,.32)}
+.result-summary{margin:0 0 7px;font-size:12.5px;color:#b4b4b4}
+.result-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.result-list li{font-size:12px;line-height:1.6;color:#a6a6a6}
+.result-list .rname{color:#cfcfcf;font-family:var(--font-mono);font-size:11.5px}
+.result-conflict{margin:8px 0 0;font-size:11.5px;line-height:1.6;color:var(--warn)}
+.result-lists{margin-top:11px;display:flex;flex-direction:column;gap:8px}
+.subhead{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#7d7d7d}
+.file-list{list-style:none;margin:3px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:3px 12px;
+  font-family:var(--font-mono);font-size:11.5px}
+.file-list li{display:flex;gap:6px;align-items:baseline;min-width:0}
+.file-list.wrote li{color:var(--success)}
+.file-list.skipped li{color:var(--error)}
+.file-list .why{font-family:var(--font-ui);font-size:11px;color:#9a8a8a}
+.file-list li.none{font-family:var(--font-ui);font-size:11px;color:#7d7d7d}
+.result-restart{margin:10px 0 0;font-size:11.5px;color:#828282}
+
+/* ---------- confirm modal ---------- */
+.scrim-2{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50}
+.prompt{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(640px,94vw);
+  max-height:76vh;display:flex;flex-direction:column;background:var(--bg-primary);
+  border:1px solid #3a3a3a;border-radius:8px;z-index:60;
+  box-shadow:0 18px 52px rgba(0,0,0,.7),0 2px 8px rgba(0,0,0,.5)}
+.prompt-head{flex:none;padding:14px 16px 0}
+.prompt-title{font-size:14px;font-weight:600;color:#e2e2e2}
+.prompt-sub{margin-top:3px;font-size:11.5px;line-height:1.55;color:#8a8a8a}
+.prompt-body{flex:1;min-height:0;overflow-y:auto;padding:12px 14px 4px}
+.prompt-body::-webkit-scrollbar{width:10px}
+.prompt-body::-webkit-scrollbar-thumb{background:#3a3a3a;border-radius:6px;
+  border:3px solid transparent;background-clip:content-box}
+.cf-file{padding:8px 0 9px;border-top:1px solid var(--border-soft)}
+.cf-file:first-child{border-top:0;padding-top:2px}
+.cf-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cf-name{font-family:var(--font-mono);font-size:12.5px;color:#dcddde}
+.cf-meta{font-size:11px;color:#8a8a8a}
+.cf-keys{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.k{font-family:var(--font-mono);font-size:10.5px;line-height:16px;padding:0 5px;
+  border-radius:3px;color:#c3bcf3;background:var(--accent-soft);
+  border:1px solid rgba(127,109,242,.28);white-space:nowrap}
+.k.add{color:#9fc7ad;background:rgba(107,191,139,.09);border-color:rgba(107,191,139,.28)}
+.cf-keys .empty{font-size:11.5px;color:#8a8a8a}
+.cf-core{margin-top:8px;padding:7px 9px;border-radius:var(--radius-s);
+  background:rgba(255,255,255,.028);border:1px solid var(--border-soft);
+  font-size:11.5px;line-height:1.65;color:#b4b4b4}
+.cf-core b{font-weight:500;color:#dcddde}
+.cf-warn{margin:12px 0 4px;padding:9px 11px;border-radius:var(--radius-s);
+  border:1px solid var(--warn-line);border-left:3px solid var(--warn);
+  background:var(--warn-bg);font-size:11.5px;line-height:1.7;color:#d3bd86}
+.cf-warn-title{display:block;margin-bottom:3px;font-weight:600;color:var(--warn)}
+.cf-warn code{font-size:10.5px;padding:0 4px;border-radius:3px;
+  background:rgba(205,181,113,.12);color:#e2c98f}
+.cf-warn p{margin:4px 0 0;color:#c2b18d}
+.prompt-foot{flex:none;display:flex;align-items:center;gap:8px;padding:11px 14px 13px;
+  border-top:1px solid var(--border-soft)}
+.prompt-foot .grow{flex:1}
+.prompt-foot .note{font-size:11px;color:#7d7d7d}
+
+/* ---------- toast ---------- */
+.toast-wrap{position:fixed;right:18px;bottom:18px;z-index:90;display:flex;flex-direction:column;
+  gap:8px;align-items:flex-end;pointer-events:none}
+.toast{max-width:380px;padding:9px 12px;border-radius:6px;background:#2b2b2b;border:1px solid #464646;
+  color:#e6e6e6;font-size:12.5px;line-height:1.5;box-shadow:0 10px 28px rgba(0,0,0,.6);
+  animation:toastIn .18s ease-out}
+@keyframes toastIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.sim-note{margin:14px 0 0;font-size:11px;color:#6f6f6f}
+.sim-link{border:0;background:none;padding:0;font:inherit;font-size:11px;color:#8e86c9;
+  cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+.sim-link:hover{color:#b3acf5}
+.sim-link + .sim-link{margin-left:12px}
+.is-hidden{display:none !important}
+
+@media (max-width:900px){
+  .settings-nav{display:none}
+  .settings-content{padding:20px 18px 40px}
+  .settings-modal{height:94vh}
+  .set-row{grid-template-columns:17px minmax(0,1fr) auto}
+  .set-desc{display:none}
+}
+</style>
+</head>
+<body>
+<div class="workspace" aria-hidden="true">
+  <div class="ribbon"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="ws-main">
+    <div class="ws-tabs"><span class="ws-tab on">笔记</span><span class="ws-tab">白板</span></div>
+    <div class="ws-note">
+      <h1>插件共享方案</h1>
+      <p></p><p></p><p></p><p></p>
+    </div>
+  </div>
+</div>
+<div class="scrim"></div>
+
+<div class="settings-modal" role="dialog" aria-modal="true" aria-label="设置">
+  <header class="modal-head">
+    <div class="modal-title">设置</div>
+    <button class="icon-btn modal-close" aria-label="关闭设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </header>
+
+  <div class="modal-body">
+    <nav class="settings-nav" aria-label="设置分类">
+      <div class="nav-item">关于</div>
+      <div class="nav-item">外观</div>
+      <div class="nav-item">编辑器</div>
+      <div class="nav-item">文件与链接</div>
+      <div class="nav-item">快捷键</div>
+      <div class="nav-item">核心插件</div>
+      <div class="nav-item">第三方插件</div>
+      <div class="nav-sub"><div class="nav-item active">Share Linker</div></div>
+      <div class="nav-item">账户</div>
+    </nav>
+
+    <main class="settings-content">
+      <div class="panel">
+
+        <!-- 1. page header: title + version + language button -->
+        <div class="page-head">
+          <h2>共享面板</h2>
+          <span class="version">v1.1.0</span>
+          <button class="btn min96" title="English" aria-label="English">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M3 12h18"/>
+              <path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/>
+            </svg>
+            English
+          </button>
+        </div>
+        <p class="vault-line"><span>当前 Vault：</span><code>E:\ProjectSrc\Plugin-Share-Linker</code></p>
+
+        <!-- 2. target vault path -->
+        <div class="setting-block">
+          <div class="setting-name"><span>目标 Vault 路径</span></div>
+          <div class="setting-desc">填写另一个 Obsidian Vault 的文件夹路径。插件、主题、CSS 片段与 Obsidian 设置都写入这一个库。</div>
+          <div class="path-row">
+            <input class="text-input" id="targetPath" type="text" value="E:\ProjectSrc\notes-work"
+              spellcheck="false" aria-label="目标 Vault 路径" autocomplete="off">
+            <button class="btn" title="从 Obsidian 记录过的库里选择目标 Vault">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/>
+              </svg>
+              选择…
+            </button>
+            <button class="btn" title="用系统文件夹对话框选择目标 Vault">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/>
+                <path d="M3 11h18"/>
+              </svg>
+              浏览…
+            </button>
+            <button class="btn" id="btnCheckTarget" title="验证目标路径是否存在、是否为 Obsidian 库、是否可写">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>
+              </svg>
+              检查目标路径
+            </button>
+          </div>
+          <p class="section-note">如果该目录还不是 Obsidian 库，共享会在其中创建 <code>.obsidian</code> 目录。</p>
+        </div>
+
+        <!-- 3. target vault check — compact strip -->
+        <section class="section health-section" aria-labelledby="healthH">
+          <div class="head-row">
+            <h3 id="healthH">目标库检测</h3>
+            <span class="badge is-hidden" id="healthBadge">1 个失效</span>
+            <button class="btn" id="btnHealth" title="扫描目标库的链接并比较设置文件">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12h4l3 7 4-14 3 7h4"/>
+              </svg>
+              检测
+            </button>
+          </div>
+          <p class="health-line" id="healthLine">尚未检测。点「检测」扫描目标库 <code>.obsidian</code> 下的链接与 8 份设置文件；不点就不会访问目标库。</p>
+          <p class="health-line is-hidden" id="healthSettings"></p>
+        </section>
+
+        <!-- 4. NEW: Obsidian 设置 — q1–q11 -->
+        <section class="section set-section" aria-labelledby="setH">
+          <h3 id="setH">Obsidian 设置</h3>
+          <div class="count-line" id="setCount">共 8 个设置文件，已选择 0 个。</div>
+          <div class="toolbar">
+            <button class="btn" id="btnSelectAllSettings" title="勾选 / 取消勾选全部设置文件">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/>
+              </svg>
+              <span id="selectAllLabel">全选</span>
+            </button>
+            <span class="toolbar-sep" aria-hidden="true"></span>
+            <button class="btn cta" id="btnShareSettings" disabled title="把勾选的设置文件按顶层键合并写入目标库">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/>
+              </svg>
+              共享设置
+            </button>
+          </div>
+
+          <p class="health-line" id="setHint">相同 / 有差异 / 缺失由上方「目标库检测」的「检测」给出；把鼠标移到文件行上可查看差异详情。</p>
+
+          <div class="set-list" id="setList"></div>
+
+          <p class="hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>
+            </svg>
+            <span>按顶层键合并：只覆盖当前库里出现的键，目标库独有的键保留，源里删掉的键不会从目标库删除。写前每份文件备份为 <code>.bak</code>，再临时文件 + rename 原子替换；逐份独立写入，失败的那份会在结果里点名。外观文件不含启用列表与当前主题（<code>cssTheme</code>、<code>enabledCssSnippets</code> 仍由主题 / 片段控件写）。</span>
+          </p>
+
+          <div class="result-card is-hidden" id="setResult" aria-live="polite"></div>
+
+          <p class="sim-note">
+            <button class="sim-link" id="btnDemoFill">演示：勾选并打开确认</button>
+            <button class="sim-link" id="btnResetDemo">重置演示状态</button>
+          </p>
+        </section>
+
+        <!-- 5. abbreviated neighbours: 插件 / 主题 / CSS 片段 -->
+        <section class="section" aria-labelledby="pluginsH">
+          <div class="head-row">
+            <h3 id="pluginsH">插件 (6)</h3>
+            <span class="head-count">已选 2 个</span>
+          </div>
+          <div class="set-list">
+            <div class="set-row">
+              <input type="checkbox" checked aria-label="共享 Dataview">
+              <span class="set-name">dataview</span>
+              <span class="set-desc">Dataview · v0.5.67 · 复杂数据视图</span>
+              <span class="chip same">已链接</span>
+            </div>
+            <div class="set-row">
+              <input type="checkbox" aria-label="共享 Templater">
+              <span class="set-name">templater-obsidian</span>
+              <span class="set-desc">Templater · v2.4.1 · 模板插入</span>
+              <span class="chip unknown">未共享</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="themesH">
+          <div class="head-row">
+            <h3 id="themesH">主题 (3)</h3>
+            <span class="head-count">已选 1 / 2</span>
+          </div>
+          <div class="set-list">
+            <div class="set-row">
+              <input type="checkbox" checked aria-label="共享 Blue Topaz">
+              <span class="set-name">Blue Topaz</span>
+              <span class="set-desc">2023080203</span>
+              <span class="chip same">已链接</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="snippetsH">
+          <div class="head-row">
+            <h3 id="snippetsH">CSS 片段 (3)</h3>
+            <span class="head-count">已选 1 / 2</span>
+          </div>
+          <div class="set-list">
+            <div class="set-row">
+              <input type="checkbox" checked aria-label="共享 wide-tables.css">
+              <span class="set-name">wide-tables.css</span>
+              <span class="set-desc">表格放宽</span>
+              <span class="chip unknown">未共享</span>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- confirm modal: per-file changed keys, core-plugin summary, vault-bound warning -->
+<div class="scrim-2 is-hidden" id="cfScrim"></div>
+<div class="prompt is-hidden" id="cfModal" role="dialog" aria-modal="true" aria-labelledby="cfTitle">
+  <div class="prompt-head">
+    <div class="prompt-title" id="cfTitle">确认共享设置</div>
+    <div class="prompt-sub" id="cfSub"></div>
+  </div>
+  <div class="prompt-body" id="cfBody"></div>
+  <div class="prompt-foot">
+    <span class="note">写前每份文件备份为 .bak，可用它回退。</span>
+    <span class="grow"></span>
+    <button class="btn tiny" id="cfCancel">取消</button>
+    <button class="btn cta" id="cfOk">确认共享</button>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* 每份设置文件：目标库现状（检测后才有）、差异键、写入后的覆盖 / 新增计数。
+     覆盖 = 目标库已有这个键、值不同（或同）；新增 = 目标库没有这个键。 */
+  var FILES = [
+    { id: 'app.json', desc: '编辑器与文件行为', state: 'diff',
+      keys: ['attachmentFolderPath', 'newFileLocation', 'userIgnoreFilters', 'showInlineTitle', 'alwaysUpdateLinks', 'defaultViewMode'],
+      overwrite: 4, added: 2, addedKeys: ['showInlineTitle', 'defaultViewMode'],
+      bound: ['attachmentFolderPath', 'newFileLocation', 'userIgnoreFilters'] },
+    { id: 'appearance.json', desc: '外观；不含启用列表与当前主题', state: 'diff',
+      keys: ['baseFontSize', 'accentColor'], overwrite: 2, added: 0 },
+    { id: 'hotkeys.json', desc: '快捷键', state: 'diff',
+      keys: ['quick-switcher:open', 'editor:toggle-bold', 'workspace:split-vertical', 'app:go-back', 'editor:save-file'],
+      overwrite: 5, added: 0 },
+    { id: 'core-plugins.json', desc: '核心插件开关', state: 'diff',
+      keys: ['daily-notes', 'templates', 'graph'], overwrite: 3, added: 0,
+      core: { enable: ['日记 daily-notes', '模板 templates'], disable: ['关系图谱 graph'] } },
+    { id: 'graph.json', desc: '关系图谱：显示与力导向参数', state: 'same', keys: [], overwrite: 0, added: 0 },
+    { id: 'templates.json', desc: '模板插件：模板文件夹与日期格式', state: 'missing',
+      keys: ['folder', 'dateFormat', 'timeFormat', 'template'], overwrite: 0, added: 4, isNew: true },
+    { id: 'daily-notes.json', desc: '日记插件：新建位置与模板', state: 'same', keys: [], overwrite: 0, added: 0 },
+    { id: 'zk-prefixer.json', desc: 'ZK 前缀：编号格式', state: 'missing',
+      keys: ['folder', 'format'], overwrite: 0, added: 2, isNew: true }
+  ];
+
+  var CHIP = { same: ['same', '相同'], diff: ['diff', '有差异'], missing: ['missing', '缺失'] };
+
+  var detected = false;
+  var selected = {};
+  var listEl = document.getElementById('setList');
+  var countEl = document.getElementById('setCount');
+  var shareBtn = document.getElementById('btnShareSettings');
+  var selectAllBtn = document.getElementById('btnSelectAllSettings');
+  var selectAllLabel = document.getElementById('selectAllLabel');
+  var resultEl = document.getElementById('setResult');
+  var toastWrap = document.getElementById('toastWrap');
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function selectedIds() {
+    return FILES.filter(function (f) { return selected[f.id]; }).map(function (f) { return f.id; });
+  }
+  function selectedCount() { return selectedIds().length; }
+
+  function chipHtml(f) {
+    if (!detected) { return '<span class="chip unknown">未检测</span>'; }
+    var c = CHIP[f.state];
+    var text = f.state === 'diff' ? '有差异 ' + f.keys.length + ' 个键' : c[1];
+    return '<span class="chip ' + c[0] + '">' + text + '</span>';
+  }
+
+  function rowTitle(f) {
+    if (!detected) { return '尚未检测。点上方「目标库检测」里的「检测」后再看差异。'; }
+    if (f.state === 'same') { return '与目标库一致：所有共享键都相同。'; }
+    if (f.state === 'missing') {
+      return '目标库没有这个文件；共享时会写入 ' + f.keys.length + ' 个键：' + f.keys.join('、');
+    }
+    var text = f.id + '：覆盖 ' + f.overwrite + ' 个键';
+    if (f.added) { text += '，新增 ' + f.added + ' 个键'; }
+    if (f.keys.length) { text += '\n覆盖：' + f.keys.join('、'); }
+    return text;
+  }
+
+  function rowHtml(f) {
+    var on = !!selected[f.id];
+    return '' +
+      '<div class="set-row' + (on ? ' is-checked' : '') + '" title="' + esc(rowTitle(f)) + '">' +
+        '<input type="checkbox" data-file="' + esc(f.id) + '"' + (on ? ' checked' : '') +
+          ' aria-label="共享 ' + esc(f.id) + '">' +
+        '<span class="set-name">' + esc(f.id) + '</span>' +
+        '<span class="set-desc">' + esc(f.desc) + '</span>' +
+        chipHtml(f) +
+      '</div>';
+  }
+
+  function render() {
+    listEl.innerHTML = FILES.map(rowHtml).join('');
+    var n = selectedCount();
+    var line = '共 8 个设置文件，已选择 ' + n + ' 个。';
+    if (detected) {
+      var diff = FILES.filter(function (f) { return f.state === 'diff'; }).length;
+      var miss = FILES.filter(function (f) { return f.state === 'missing'; }).length;
+      var same = FILES.filter(function (f) { return f.state === 'same'; }).length;
+      line = '共 8 个设置文件，已选择 ' + n + ' 个 · ' + diff + ' 个有差异、' + miss + ' 个缺失、' + same + ' 个相同。';
+    }
+    countEl.textContent = line;
+    shareBtn.disabled = n === 0;
+    selectAllLabel.textContent = (n === FILES.length) ? '取消全选' : '全选';
+    selectAllBtn.title = (n === FILES.length) ? '取消勾选全部设置文件' : '勾选全部设置文件';
+  }
+
+  function detect() {
+    detected = true;
+    render();
+  }
+
+  function toast(msg) {
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    toastWrap.appendChild(el);
+    setTimeout(function () {
+      el.style.transition = 'opacity .18s';
+      el.style.opacity = '0';
+      setTimeout(function () { if (el.parentNode) { el.parentNode.removeChild(el); } }, 200);
+    }, 3400);
+  }
+
+  /* ---------- rows ---------- */
+  listEl.addEventListener('change', function (e) {
+    var box = e.target;
+    if (!box || box.type !== 'checkbox') { return; }
+    var id = box.getAttribute('data-file');
+    if (!id) { return; }
+    if (box.checked) { selected[id] = true; } else { delete selected[id]; }
+    render();
+  });
+
+  /* ---------- toolbar ---------- */
+  render();
+
+  selectAllBtn.addEventListener('click', function () {
+    var all = selectedCount() === FILES.length;
+    selected = {};
+    if (!all) { FILES.forEach(function (f) { selected[f.id] = true; }); }
+    render();
+  });
+
+  shareBtn.addEventListener('click', function () {
+    if (!selectedCount()) { return; }
+    openConfirm();
+  });
+
+  /* ---------- confirm modal ---------- */
+  var cfScrim = document.getElementById('cfScrim');
+  var cfModal = document.getElementById('cfModal');
+  var cfBody = document.getElementById('cfBody');
+  var cfSub = document.getElementById('cfSub');
+  var targetPath = document.getElementById('targetPath');
+
+  function fileBlock(f) {
+    var meta;
+    if (f.state === 'same') {
+      meta = '键值相同，写入不会改变这份文件';
+    } else if (f.isNew) {
+      meta = '目标库没有这份文件，将新建 · 新增 ' + f.keys.length + ' 个键';
+    } else {
+      meta = '覆盖 ' + f.overwrite + ' 个键 · 新增 ' + f.added + ' 个键';
+    }
+    var addedKeys = f.isNew ? f.keys : (f.addedKeys || []);
+    var keys = f.keys.length
+      ? f.keys.map(function (k) {
+          return '<code class="k' + (addedKeys.indexOf(k) >= 0 ? ' add' : '') + '">' + esc(k) + '</code>';
+        }).join('')
+      : '<span class="empty">没有差异键</span>';
+
+    var html = '<div class="cf-file">' +
+      '<div class="cf-head"><span class="cf-name">' + esc(f.id) + '</span>' +
+        '<span class="cf-meta">' + meta + '</span></div>' +
+      '<div class="cf-keys">' + keys + '</div>';
+
+    if (f.core) {
+      html += '<div class="cf-core">将启用 <b>' + f.core.enable.length + '</b> 个、停用 <b>' +
+        f.core.disable.length + '</b> 个核心插件：启用 <b>' +
+        f.core.enable.join('、') + '</b>；停用 <b>' + f.core.disable.join('、') + '</b>。</div>';
+    }
+    return html + '</div>';
+  }
+
+  function openConfirm() {
+    var files = FILES.filter(function (f) { return selected[f.id]; });
+    var writes = files.filter(function (f) { return f.state !== 'same'; }).length;
+    var app = FILES.filter(function (f) { return f.id === 'app.json'; })[0];
+
+    cfSub.textContent = '将写入 ' + writes + ' 份设置文件到 ' +
+      (targetPath.value.trim() || '(未填写)') + '\\.obsidian。按顶层键合并，目标库独有的键保留。';
+
+    var html = files.map(fileBlock).join('');
+
+    if (selected['app.json']) {
+      html += '<div class="cf-warn">' +
+        '<span class="cf-warn-title">库绑定键：会改变目标库的文件行为，仍会照常写入</span>' +
+        app.bound.map(function (k) { return '<code>' + esc(k) + '</code>'; }).join('') +
+        '<p>这三个键决定目标库把新附件、新建笔记放到哪里，以及哪些笔记不出现在搜索与链接建议里。它们和库的目录结构绑定，共享过去后目标库会沿用当前库的存法；如需保留目标库原来的位置，请在写入后到目标库里改回，或用 <code>.bak</code> 还原 app.json。</p>' +
+        '</div>';
+    }
+
+    cfBody.innerHTML = html;
+    cfScrim.classList.remove('is-hidden');
+    cfModal.classList.remove('is-hidden');
+    document.getElementById('cfOk').focus();
+  }
+
+  function closeConfirm() {
+    cfScrim.classList.add('is-hidden');
+    cfModal.classList.add('is-hidden');
+  }
+
+  document.getElementById('cfCancel').addEventListener('click', closeConfirm);
+  cfScrim.addEventListener('click', closeConfirm);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !cfModal.classList.contains('is-hidden')) { closeConfirm(); }
+  });
+
+  /* ---------- result ---------- */
+  function renderResult() {
+    var files = FILES.filter(function (f) { return selected[f.id]; });
+    /* 逐文件独立写（q9）：templates.json 这次被占用，其余照写 */
+    var failed = files.filter(function (f) { return f.id === 'templates.json'; });
+    var wrote = files.filter(function (f) { return f.id !== 'templates.json' && f.state !== 'same'; });
+    var untouched = files.filter(function (f) { return f.state === 'same' && f.id !== 'templates.json'; });
+
+    var totalKeys = 0;
+    var lines = wrote.map(function (f) {
+      var n = f.overwrite + f.added;
+      totalKeys += n;
+      return '<li><span class="rname">' + esc(f.id) + '</span>：已写 ' + n + ' 个键（覆盖 ' +
+        f.overwrite + ' / 新增 ' + f.added + '）</li>';
+    }).join('');
+
+    var untouchedLines = untouched.map(function (f) {
+      return '<li><span class="rname">' + esc(f.id) + '</span>：写入 0 个键（键值已相同，未改动）</li>';
+    }).join('');
+
+    var conflict = selected['hotkeys.json']
+      ? '<p class="result-conflict">快捷键冲突 1 处：Ctrl+P 已绑定「Quick switcher」，本次写入后「Omnisearch」也使用 Ctrl+P（仍已写入，Obsidian 会在设置里标黄）。</p>'
+      : '';
+
+    var wroteList = wrote.map(function (f) { return '<li>' + esc(f.id) + '</li>'; }).join('') ||
+      '<li class="none">无</li>';
+    var skippedList = failed.map(function (f) {
+      return '<li>' + esc(f.id) + '<span class="why">写入失败：EBUSY: resource busy or locked, rename ' +
+        '\u0027templates.json.tmp\u0027 → \u0027templates.json\u0027</span></li>';
+    }).join('') || '<li class="none">无</li>';
+
+    var summary = '写入 ' + wrote.length + ' 份、未改动 ' + untouched.length + ' 份、失败 ' +
+      failed.length + ' 份；共 ' + totalKeys + ' 个键。';
+
+    resultEl.innerHTML =
+      '<div class="result-head">' +
+        '<span class="result-title">共享结果</span>' +
+        '<span class="mode-chip">键级合并</span>' +
+      '</div>' +
+      '<p class="result-summary">' + summary + '</p>' +
+      '<ul class="result-list">' + lines + untouchedLines + '</ul>' +
+      conflict +
+      '<div class="result-lists">' +
+        '<div><div class="subhead">已写</div><ul class="file-list wrote">' + wroteList + '</ul></div>' +
+        '<div><div class="subhead">未写</div><ul class="file-list skipped">' + skippedList + '</ul></div>' +
+      '</div>' +
+      '<p class="result-restart">目标库重启 Obsidian（或 Ctrl/Cmd+R）后生效。'
+      + (failed.length ? '未写的那份可以用「共享设置」再点一次补上。' : '') + '</p>';
+
+    resultEl.classList.remove('is-hidden');
+    resultEl.classList.remove('flash');
+    void resultEl.offsetWidth;
+    resultEl.classList.add('flash');
+    if (resultEl.scrollIntoView) { resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  }
+
+  document.getElementById('cfOk').addEventListener('click', function () {
+    var failed = selected['templates.json'] ? 1 : 0;
+    var wrote = FILES.filter(function (f) {
+      return selected[f.id] && f.id !== 'templates.json' && f.state !== 'same';
+    }).length;
+    closeConfirm();
+    renderResult();
+    toast('共享完成：写入 ' + wrote + ' 份设置文件' + (failed ? '，1 份未写。' : '。'));
+  });
+
+  /* ---------- compact link health ---------- */
+  document.getElementById('btnHealth').addEventListener('click', function () {
+    var badge = document.getElementById('healthBadge');
+    badge.classList.remove('is-hidden');
+    badge.textContent = '1 个失效';
+    document.getElementById('healthLine').innerHTML =
+      '共 <b>12</b> 项：<b>9</b> 个链接（<b>8</b> 健康、<b>1</b> 失效、<b>0</b> 源库不可达），<b>3</b> 个实体副本。失效的那个可以到下方「插件」区重建链接。';
+    var settingsLine = document.getElementById('healthSettings');
+    settingsLine.classList.remove('is-hidden');
+    settingsLine.innerHTML =
+      '设置文件：<b>1</b> 份相同、<b>1</b> 份有差异、<b>2</b> 份缺失。文件行在下方「Obsidian 设置」，悬停可看差异键。';
+    detect();
+  });
+
+  document.getElementById('btnCheckTarget').addEventListener('click', function () {
+    toast('目标路径检查通过：存在且是文件夹、是 Obsidian 库、文件夹可写（耗时 42 ms）。');
+  });
+
+  /* ---------- reset / demo ---------- */
+  document.getElementById('btnDemoFill').addEventListener('click', function () {
+    detected = false;
+    selected = {};
+    ['app.json', 'appearance.json', 'hotkeys.json', 'core-plugins.json', 'templates.json']
+      .forEach(function (id) { selected[id] = true; });
+    resultEl.classList.add('is-hidden');
+    resultEl.innerHTML = '';
+    render();
+    openConfirm();
+  });
+
+  document.getElementById('btnResetDemo').addEventListener('click', function () {
+    detected = false;
+    selected = {};
+    resultEl.classList.add('is-hidden');
+    resultEl.innerHTML = '';
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
